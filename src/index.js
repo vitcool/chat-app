@@ -3,7 +3,12 @@ const http = require("http");
 const express = require("express");
 const socketio = require("socket.io");
 const Filter = require("bad-words");
-const { generateMessage, generateLocationMessage } = require("./utils/messages");
+
+const {
+  generateMessage,
+  generateLocationMessage,
+} = require("./utils/messages");
+const { addUser, removeUser, getUser, getUsersInRoom } = require("./utils/users");
 
 const app = express();
 const server = http.createServer(app);
@@ -19,8 +24,31 @@ server.listen(port, () => {
 });
 
 io.on("connection", (socket) => {
-  socket.emit("message", generateMessage("Welcome!"));
-  socket.broadcast.emit("message", generateMessage("A new user has joined!"));
+  socket.on("join", ({ username, room }, callback) => {
+    const { id } = socket;
+    const { error, user } = addUser({ id: socket.id, username, room });
+
+    if (error) {
+      return callback(error);
+    }
+
+    socket.join(room);
+    socket.emit("message", generateMessage("Admin", "Welcome!"));
+    socket.broadcast
+      .to(user.room)
+      .emit(
+        "message",
+        generateMessage(`A new user ${user.username} has joined!`)
+      );
+
+    const users = getUsersInRoom(room);
+    io.to(room).emit("roomData", {
+      room,
+      users,
+    });
+  
+    callback();
+  });
 
   socket.on("sendMessage", (message, callback) => {
     const filter = new Filter();
@@ -29,18 +57,46 @@ io.on("connection", (socket) => {
       return callback("Profanity is not allowed");
     }
 
-    io.emit("message", generateMessage(message));
+    const user = getUser(socket.id);
+
+    if (!user) {
+      return callback("User not found");
+    }
+
+    const { room, username } = user;
+    io.to(room).emit("message", generateMessage(username, message));
     callback();
   });
 
   socket.on("sendLocation", (location, callback) => {
     const { latitude, longitude } = location;
     const message = `https://google.com/maps?q=${latitude},${longitude}`;
-    io.emit("locationMessage", generateLocationMessage(message));
+    const user = getUser(socket.id);
+
+    if (!user) {
+      return callback("User not found");
+    }
+
+    const { room, username } = user;
+    io.to(room).emit(
+      "locationMessage",
+      generateLocationMessage(username, message)
+    );
     callback();
   });
 
   socket.on("disconnect", () => {
-    io.emit("message", generateMessage("User has left"));
+    const user = removeUser(socket.id);
+
+    if (user) {
+      const { room, username } = user;
+      io.to(room).emit("roomData", {
+        room,
+        users: getUsersInRoom(room),
+      });
+      return io
+        .to(room)
+        .emit("message", generateMessage(`${username} has left`));
+    }
   });
 });

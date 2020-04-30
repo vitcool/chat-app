@@ -10,27 +10,66 @@ const $messages = document.querySelector("#messages");
 //templates
 const messageTemplate = document.querySelector("#message-template").innerHTML;
 const locationTemplate = document.querySelector("#location-template").innerHTML;
+const sidebarTemplate = document.querySelector("#sidebar-template").innerHTML;
+
+//options
+const { username, room } = Qs.parse(location.search, {
+  ignoreQueryPrefix: true,
+});
 
 const formatTime = (time) => moment(time).format("HH:mm");
 
+const autoscroll = () => {
+  // new message eleemtn
+  const $newMessage = $messages.lastElementChild;
+
+  // get height of last message
+  const newMessageStyles = getComputedStyle($newMessage);
+  const newMessageMargin = parseInt(newMessageStyles.marginBottom);
+  const newMessageHeight = $newMessage.offsetHeight + newMessageMargin;
+
+  //visible height
+  const visibleHeight = $messages.offsetHeight;
+
+  //height of messages
+  const containerHeight = $messages.scrollHeight;
+
+  //how far i scrolled
+  const scrollOffset = $messages.scrollTop + visibleHeight;
+
+  if (containerHeight - newMessageHeight <= scrollOffset) {
+    $messages.scrollTop = $messages.scrollHeight;
+  }
+};
+
 socket.on("message", (message) => {
-  console.log(message);
-  const { text, createdAt } = message;
+  const { username, text, createdAt } = message;
   const html = Mustache.render(messageTemplate, {
+    username,
     message: text,
     createdAt: formatTime(createdAt),
   });
   $messages.insertAdjacentHTML("beforeend", html);
+  autoscroll();
 });
 
 socket.on("locationMessage", (location) => {
-  console.log("locationMessage", location);
-  const { link, createdAt } = location;
+  const { username, link, createdAt } = location;
   const html = Mustache.render(locationTemplate, {
+    username,
     link,
     createdAt: formatTime(createdAt),
   });
   $messages.insertAdjacentHTML("beforeend", html);
+  autoscroll();
+});
+
+socket.on("roomData", ({ room, users }) => {
+  const html = Mustache.render(sidebarTemplate, {
+    room,
+    users,
+  });
+  document.querySelector("#sidebar").innerHTML = html;
 });
 
 $messageForm.addEventListener("submit", (e) => {
@@ -43,9 +82,8 @@ $messageForm.addEventListener("submit", (e) => {
     $messageFormInput.value = "";
     $messageFormInput.focus();
     if (error) {
-      return console.log(`Received the following error - ${error}`);
+      return alert(`Received the following error - ${error}`);
     }
-    console.log("Message delivered");
   });
 });
 
@@ -64,10 +102,16 @@ $sendLocationButton.addEventListener("click", () => {
 
       socket.emit("sendLocation", obj, () => {
         $sendLocationButton.removeAttribute("disabled");
-        console.log("Location shared!");
       });
     },
-    () => console.log("An error is occured"),
+    () => alert("An error is occured while get location"),
     { timeout: 10000 }
   );
+});
+
+socket.emit("join", { username, room }, (error) => {
+  if (error) {
+    alert(error);
+    location.href = "/";
+  }
 });
